@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 cmake_policy(SET CMP0063 NEW)
 
-project(libosdp VERSION 1.3.0)
+project(libosdp VERSION 1.5.0)
 
 set(PROJECT_AUTHOR       "Siddharth Chandrasekaran")
 set(PROJECT_AUTHOR_EMAIL "siddharth@embedjournal.com")
@@ -33,14 +33,19 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+option(CONFIG_OSDP_STATIC_PD "Setup PD single statically" OFF)
+
 # Each subdirecttory has it's own CMakeLists.txt
 add_subdirectory(utils)
 add_subdirectory(src)
-add_subdirectory(osdpctl)
-add_subdirectory(test)
-add_subdirectory(samples/c)
-add_subdirectory(doc)
-add_subdirectory(python)
+if (NOT CONFIG_OSDP_STATIC_PD)
+	add_subdirectory(osdpctl)
+	add_subdirectory(test)
+	add_subdirectory(samples/c)
+	add_subdirectory(samples/cpp)
+	add_subdirectory(doc)
+	add_subdirectory(python)
+endif()
 
 ## uninstall target
 add_custom_target(uninstall

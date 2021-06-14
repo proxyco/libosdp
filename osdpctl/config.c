@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include <utils/memory.h>
 #include <utils/strutils.h>
 
 #include "ini_parser.h"
@@ -137,7 +138,8 @@ int config_parse_key_channel_speed(const char *val, void *data)
 	if (safe_atoi(val, &baud))
 		return INI_FAILURE;
 
-	if (baud != 9600 && baud != 38400 && baud != 115200) {
+	if (baud != 9600 && baud != 19200 && baud != 38400 &&
+	    baud != 115200 && baud != 230400) {
 		printf("Error: invalid baudrate %d\n", baud);
 		return INI_FAILURE;
 	}
@@ -214,7 +216,7 @@ int config_parse_key_address(const char *val, void *data)
 	if (safe_atoi(val, &addr))
 		return INI_FAILURE;
 
-	if (addr == 0 || addr > 127)
+	if (addr < 0 || addr > 127)
 		return INI_FAILURE;
 	p->address = addr;
 
@@ -390,7 +392,7 @@ void config_parse(const char *filename, struct config_s *config)
 		exit(-1);
 	}
 	if (ret == -2) {
-		printf("Error: memory alloc failed when paring: %s\n", filename);
+		printf("Error: memory alloc failed when parsing: %s\n", filename);
 		exit(-1);
 	}
 	if (ret < 0) {
@@ -415,7 +417,8 @@ void config_parse(const char *filename, struct config_s *config)
 
 	if (config->pd->channel_type == CHANNEL_TYPE_MSGQ) {
 		if (config->mode == CONFIG_MODE_PD) {
-			safe_free(config->pd->channel_device);
+			if (config->pd->channel_device)
+				free(config->pd->channel_device);
 			config->pd->channel_device = safe_strdup(config->config_file);
 		}
 	}

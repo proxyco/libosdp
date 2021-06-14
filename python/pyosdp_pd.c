@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -153,7 +153,9 @@ static int pyosdp_add_pd_cap(PyObject *obj, osdp_pd_info_t *info)
 	int i, cap_list_size, function_code, compliance_level, num_items;
 
 	cap_list_size = (int)PyList_Size(obj);
-	if (cap_list_size == 0 || cap_list_size >= OSDP_PD_CAP_SENTINEL) {
+	if (cap_list_size == 0)
+		return 0;
+	if (cap_list_size >= OSDP_PD_CAP_SENTINEL) {
 		PyErr_SetString(PyExc_ValueError, "Invalid cap list size");
 		return -1;
 	}
@@ -197,26 +199,23 @@ static int pyosdp_add_pd_cap(PyObject *obj, osdp_pd_info_t *info)
 	"@return None"
 static int pyosdp_pd_tp_init(pyosdp_t *self, PyObject *args, PyObject *kwargs)
 {
-	int ret;
+	int ret, scbk_length;
 	osdp_t *ctx;
 	osdp_pd_info_t info;
 	enum channel_type channel_type;
 	char *device = NULL, *channel_type_str = NULL;
 	static char *kwlist[] = { "", "capabilities", "scbk", NULL };
 	PyObject *py_info, *py_pd_cap_list;
-	Py_buffer scbk_buffer;
 	uint8_t *scbk = NULL;
 
 	srand(time(NULL));
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|$O!y*", kwlist,
-					 &PyDict_Type, &py_info,
-					 &PyList_Type, &py_pd_cap_list,
-					 &scbk_buffer))
-		goto error;
+	info.cap = NULL;
 
-	if (scbk_buffer.buf != NULL && scbk_buffer.len == 16)
-		scbk = scbk_buffer.buf;
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|$O!", kwlist,
+					 &PyDict_Type, &py_info,
+					 &PyList_Type, &py_pd_cap_list))
+		goto error;
 
 	if (py_pd_cap_list && pyosdp_add_pd_cap(py_pd_cap_list, &info))
 		goto error;
@@ -253,8 +252,12 @@ static int pyosdp_pd_tp_init(pyosdp_t *self, PyObject *args, PyObject *kwargs)
 	if (pyosdp_dict_get_int(py_info, "serial_number", (int *)&info.id.serial_number))
 		goto error;
 
-	info.flags = 0;
-	info.cap = NULL;
+	if (pyosdp_dict_get_bytes(py_info, "scbk", &scbk, &scbk_length))
+		goto error;
+
+	info.scbk = NULL;
+	if (scbk && scbk_length == 16)
+		info.scbk = scbk;
 
 	channel_type = channel_guess_type(channel_type_str);
 	if (channel_type == CHANNEL_TYPE_ERR) {
@@ -272,7 +275,7 @@ static int pyosdp_pd_tp_init(pyosdp_t *self, PyObject *args, PyObject *kwargs)
 	channel_get(&self->chn_mgr, device, &info.channel.id, &info.channel.data,
 		    &info.channel.send, &info.channel.recv, &info.channel.flush);
 
-	ctx = osdp_pd_setup(&info, scbk);
+	ctx = osdp_pd_setup(&info);
 	if (ctx == NULL) {
 		PyErr_SetString(PyExc_Exception, "failed to setup pd");
 		goto error;
@@ -281,10 +284,12 @@ static int pyosdp_pd_tp_init(pyosdp_t *self, PyObject *args, PyObject *kwargs)
 	self->ctx = ctx;
 	safe_free(channel_type_str);
 	safe_free(device);
+	safe_free(info.cap);
 	return 0;
 error:
 	safe_free(channel_type_str);
 	safe_free(device);
+	safe_free(info.cap);
 	return -1;
 }
 

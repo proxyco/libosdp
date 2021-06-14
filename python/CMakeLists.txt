@@ -1,11 +1,11 @@
 #
-#  Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
 
-find_package(PythonInterp 3.6 REQUIRED)
-find_package(PythonLibs   3.6 REQUIRED)
+find_package(PythonInterp 3 REQUIRED)
+find_package(PythonLibs   3 REQUIRED)
 
 set(OSDP_PYTHON_PACKAGE_NAME osdp)
 set(OSDP_PYTHON_PACKAGE_VERSION ${PROJECT_VERSION})
@@ -17,7 +17,7 @@ add_custom_target(python
 )
 
 add_custom_target(python_install
-	COMMAND ${PYTHON_EXECUTABLE} setup.py install
+	COMMAND ${PYTHON_EXECUTABLE} setup.py install --user
 		--record ${CMAKE_BINARY_DIR}/python_install_manifest.txt
 )
 

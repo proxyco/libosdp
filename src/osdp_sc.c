@@ -1,13 +1,13 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <string.h>
 #include "osdp_common.h"
 
 #define OSDP_SC_EOM_MARKER             0x80  /* End of Message Marker */
+#define LOG_TAG "SC: "
 
 /* Default key as specified in OSDP specification */
 static const uint8_t osdp_scbk_default[16] = {
@@ -15,16 +15,15 @@ static const uint8_t osdp_scbk_default[16] = {
 	0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F
 };
 
-void osdp_compute_scbk(struct osdp_pd *pd, uint8_t *scbk)
+void osdp_compute_scbk(struct osdp_pd *pd, uint8_t *master_key, uint8_t *scbk)
 {
 	int i;
-	struct osdp *ctx = TO_CTX(pd);
 
 	memcpy(scbk, pd->sc.pd_client_uid, 8);
 	for (i = 8; i < 16; i++) {
 		scbk[i] = ~scbk[i - 8];
 	}
-	osdp_encrypt(ctx->sc_master_key, NULL, scbk, 16);
+	osdp_encrypt(master_key, NULL, scbk, 16);
 }
 
 void osdp_compute_session_keys(struct osdp *ctx)
@@ -36,11 +35,12 @@ void osdp_compute_session_keys(struct osdp *ctx)
 		memcpy(pd->sc.scbk, osdp_scbk_default, 16);
 	} else {
 		/**
-		 * Compute SCBK only in CP mode. PD mode, expect to already have
-		 * the SCBK (sent from application layer).
+		 * Compute SCBK only in CP mode when SCBK was not provided for
+		 * each connected PD.
 		 */
-		if (ISSET_FLAG(pd, PD_FLAG_PD_MODE) == 0) {
-			osdp_compute_scbk(pd, pd->sc.scbk);
+		if (ISSET_FLAG(pd, PD_FLAG_PD_MODE)  == false &&
+		    ISSET_FLAG(pd, PD_FLAG_HAS_SCBK) == false) {
+			osdp_compute_scbk(pd, ctx->sc_master_key, pd->sc.scbk);
 		}
 	}
 
@@ -74,9 +74,8 @@ void osdp_compute_cp_cryptogram(struct osdp_pd *pd)
 /**
  * Like memcmp; but operates at constant time.
  *
- * Returns:
- *    0: if memory pointed to by s1 and and s2 are identical.
- *  +ve: if the they are different.
+ * Returns 0 if memory pointed to by s1 and and s2 are identical; non-zero
+ * otherwise.
  */
 static int osdp_ct_compare(const void *s1, const void *s2, size_t len)
 {
@@ -85,11 +84,9 @@ static int osdp_ct_compare(const void *s1, const void *s2, size_t len)
 	const uint8_t *_s2 = s2;
 
 	for (i = 0; i < len; i++) {
-		if (_s1[i] != _s2[i]) {
-			ret++;
-		}
+		ret |= _s1[i] ^ _s2[i];
 	}
-	return ret;
+	return (int)ret;
 }
 
 int osdp_verify_cp_cryptogram(struct osdp_pd *pd)
@@ -155,15 +152,16 @@ int osdp_decrypt_data(struct osdp_pd *pd, int is_cmd, uint8_t *data, int length)
 
 	osdp_decrypt(pd->sc.s_enc, iv, data, length);
 
-	while (data[length - 1] == 0x00) {
+	length--;
+	while (length && data[length] == 0x00) {
 		length--;
 	}
-	if (data[length - 1] != OSDP_SC_EOM_MARKER) {
+	if (data[length] != OSDP_SC_EOM_MARKER) {
 		return -1;
 	}
-	data[length - 1] = 0;
+	data[length] = 0;
 
-	return length - 1;
+	return length;
 }
 
 int osdp_encrypt_data(struct osdp_pd *pd, int is_cmd, uint8_t *data, int length)
@@ -223,12 +221,14 @@ int osdp_compute_mac(struct osdp_pd *pd, int is_cmd,
 void osdp_sc_init(struct osdp_pd *pd)
 {
 	uint8_t key[16];
+	bool preserve_scbk = ISSET_FLAG(pd, PD_FLAG_PD_MODE) ||
+			     ISSET_FLAG(pd, PD_FLAG_HAS_SCBK);
 
-	if (ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
+	if (preserve_scbk) {
 		memcpy(key, pd->sc.scbk, 16);
 	}
 	memset(&pd->sc, 0, sizeof(struct osdp_secure_channel));
-	if (ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
+	if (preserve_scbk) {
 		memcpy(pd->sc.scbk, key, 16);
 	}
 	if (ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
@@ -240,5 +240,7 @@ void osdp_sc_init(struct osdp_pd *pd)
 		pd->sc.pd_client_uid[5] = BYTE_1(pd->id.serial_number);
 		pd->sc.pd_client_uid[6] = BYTE_2(pd->id.serial_number);
 		pd->sc.pd_client_uid[7] = BYTE_3(pd->id.serial_number);
+	} else {
+		osdp_get_rand(pd->sc.cp_random, 8);
 	}
 }

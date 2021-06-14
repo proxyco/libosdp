@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -76,7 +76,8 @@ int test_cp_build_packet_id(struct osdp *ctx)
 
 int test_phy_decode_packet_ack(struct osdp *ctx)
 {
-	int len;
+	uint8_t *buf;
+	int len, err;
 	struct osdp_pd *p = GET_CURRENT_PD(ctx);
 	uint8_t packet[] = {
 #ifndef CONFIG_OSDP_SKIP_MARK_BYTE
@@ -87,11 +88,16 @@ int test_phy_decode_packet_ack(struct osdp *ctx)
 	uint8_t expected[] = { REPLY_ACK };
 
 	printf("Testing phy_decode_packet(REPLY_ACK) -- ");
-	if ((len = osdp_phy_decode_packet(p, packet, sizeof(packet))) < 0) {
+	err = osdp_phy_check_packet(p, packet, sizeof(packet), &len);
+	if (err) {
 		printf("failed!\n");
 		return -1;
 	}
-	CHECK_ARRAY(packet, len, expected);
+	if ((len = osdp_phy_decode_packet(p, packet, len, &buf)) < 0) {
+		printf("failed!\n");
+		return -1;
+	}
+	CHECK_ARRAY(buf, len, expected);
 	printf("success!\n");
 	return 0;
 }
@@ -106,15 +112,16 @@ int test_cp_phy_setup(struct test *t)
 		.channel.data = NULL,
 		.channel.send = NULL,
 		.channel.recv = NULL,
-		.channel.flush = NULL
+		.channel.flush = NULL,
+		.scbk = NULL,
 	};
+	osdp_logger_init(t->loglevel, printf);
 	struct osdp *ctx = (struct osdp *) osdp_cp_setup(1, &info, NULL);
 	if (ctx == NULL) {
 		printf("   init failed!\n");
 		return -1;
 	}
 	SET_CURRENT_PD(ctx, 0);
-	osdp_set_log_level(LOG_INFO);
 	t->mock_data = (void *)ctx;
 	return 0;
 }

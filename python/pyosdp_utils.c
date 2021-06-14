@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -42,7 +42,7 @@ int pyosdp_dict_add_bytes(PyObject *dict, const char *key, const uint8_t *data, 
 		return -1;
 	ret = PyDict_SetItemString(dict, key, obj);
 	Py_DECREF(obj);
-	return 0;
+	return ret;
 }
 
 int pyosdp_module_add_type(PyObject *module, const char *name,

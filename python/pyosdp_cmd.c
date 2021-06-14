@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -265,7 +265,6 @@ static int pyosdp_handle_cmd_keyset(struct osdp_cmd *p, PyObject *dict)
 {
 	int type, len;
 	struct osdp_cmd_keyset *cmd = &p->keyset;
-	char *data = NULL;
 	uint8_t *buf;
 
 	p->id = OSDP_CMD_KEYSET;
@@ -277,7 +276,6 @@ static int pyosdp_handle_cmd_keyset(struct osdp_cmd *p, PyObject *dict)
 		return -1;
 
 	cmd->type = (uint8_t)type;
-	cmd->length = strlen(data);
 	if (len > OSDP_CMD_KEYSET_KEY_MAX_LEN)
 		return -1;
 	cmd->length = len;

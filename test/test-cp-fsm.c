@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -85,14 +85,15 @@ int test_cp_fsm_setup(struct test *t)
 		.channel.data = NULL,
 		.channel.send = test_cp_fsm_send,
 		.channel.recv = test_cp_fsm_receive,
-		.channel.flush = NULL
+		.channel.flush = NULL,
+		.scbk = NULL,
 	};
+	osdp_logger_init(t->loglevel, printf);
 	struct osdp *ctx = (struct osdp *) osdp_cp_setup(1, &info, NULL);
 	if (ctx == NULL) {
 		printf("   init failed!\n");
 		return -1;
 	}
-	osdp_set_log_level(LOG_INFO);
 	SET_CURRENT_PD(ctx, 0);
 	SET_FLAG(GET_CURRENT_PD(ctx), PD_FLAG_SKIP_SEQ_CHECK);
 	t->mock_data = (void *)ctx;

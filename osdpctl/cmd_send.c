@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -193,8 +193,11 @@ int handle_cmd_comset(int argc, char *argv[], struct osdp_cmd_comset *c)
 	if (safe_atoi(argv[1], &baud))
 		return -1;
 
-	if (address <= 0 || address >= 126 ||
-	    (baud != 9600 && baud != 38400 && baud != 115200))
+	if (address <= 0 || address >= 126)
+		return -1;
+
+	if (baud != 9600 && baud != 19200 && baud != 38400 &&
+	    baud != 115200 && baud != 230400)
 		return -1;
 
 	c->address = (uint8_t)address;

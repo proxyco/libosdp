@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
@@ -27,6 +27,21 @@ pd_info = {
 pd_cap = [
     {
         "function_code": osdp.CAP_OUTPUT_CONTROL,
+        "compliance_level": 1,
+        "num_items": 1
+    },
+    {
+        "function_code": osdp.CAP_READER_LED_CONTROL,
+        "compliance_level": 1,
+        "num_items": 1
+    },
+    {
+        "function_code": osdp.CAP_READER_AUDIBLE_OUTPUT,
+        "compliance_level": 1,
+        "num_items": 1
+    },
+    {
+        "function_code": osdp.CAP_READER_TEXT_OUTPUT,
         "compliance_level": 1,
         "num_items": 1
     },

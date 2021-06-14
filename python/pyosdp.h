@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,6 +17,7 @@
 #include <utils/strutils.h>
 #include <utils/hashmap.h>
 #include <utils/channel.h>
+#include <utils/memory.h>
 #include <osdp.h>
 
 typedef struct {

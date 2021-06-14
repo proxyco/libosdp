@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
@@ -7,6 +7,7 @@
 ## Options
 option(CONFIG_OSDP_PACKET_TRACE "Enable raw packet trace for diagnostics" OFF)
 option(CONFIG_OSDP_SKIP_MARK_BYTE "Don't send the leading mark byte (0xFF)" OFF)
+option(CONFIG_DISABLE_PRETTY_LOGGING "Don't colorize log ouputs" OFF)
 
 if (CONFIG_OSDP_PACKET_TRACE)
 	list(APPEND LIB_OSDP_DEFINITIONS "-DCONFIG_OSDP_PACKET_TRACE")
@@ -14,6 +15,18 @@ endif()
 
 if (CONFIG_OSDP_SKIP_MARK_BYTE)
 	list(APPEND LIB_OSDP_DEFINITIONS "-DCONFIG_OSDP_SKIP_MARK_BYTE")
+endif()
+
+if (CONFIG_DISABLE_PRETTY_LOGGING)
+	list(APPEND LIB_OSDP_DEFINITIONS "-DCONFIG_DISABLE_PRETTY_LOGGING")
+endif()
+
+if (CONFIG_OSDP_STATIC_PD)
+	list(APPEND LIB_OSDP_DEFINITIONS "-DCONFIG_OSDP_STATIC_PD")
+endif()
+
+if (CONFIG_OSDP_FILE)
+	list(APPEND LIB_OSDP_DEFINITIONS "-DCONFIG_OSDP_FILE")
 endif()
 
 # static and shared library names
@@ -29,10 +42,21 @@ configure_file(osdp_config.h.in osdp_config.h @ONLY)
 list(APPEND LIB_OSDP_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/osdp_common.c
 	${CMAKE_CURRENT_SOURCE_DIR}/osdp_phy.c
-	${CMAKE_CURRENT_SOURCE_DIR}/osdp_cp.c
 	${CMAKE_CURRENT_SOURCE_DIR}/osdp_pd.c
 	${CMAKE_CURRENT_SOURCE_DIR}/osdp_sc.c
 )
+
+if (NOT CONFIG_OSDP_STATIC_PD)
+	list(APPEND LIB_OSDP_SOURCES
+		${CMAKE_CURRENT_SOURCE_DIR}/osdp_cp.c
+	)
+endif()
+
+if (CONFIG_OSDP_FILE)
+	list(APPEND LIB_OSDP_SOURCES
+		${CMAKE_CURRENT_SOURCE_DIR}/osdp_file.c
+	)
+endif()
 
 list(APPEND LIB_OSDP_INCLUDE_DIRS
 	${CMAKE_SOURCE_DIR}/utils/include
@@ -96,7 +120,6 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 #
 list(APPEND LIB_OSDP_UTILS_SRC
 	${CMAKE_SOURCE_DIR}/utils/src/utils.c
-	${CMAKE_SOURCE_DIR}/utils/src/strutils.c
 	${CMAKE_SOURCE_DIR}/utils/src/list.c
 	${CMAKE_SOURCE_DIR}/utils/src/queue.c
 	${CMAKE_SOURCE_DIR}/utils/src/slab.c

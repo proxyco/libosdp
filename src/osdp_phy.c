@@ -1,14 +1,12 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <string.h>
 #include "osdp_common.h"
 
-#define TAG "PHY: "
-
+#define LOG_TAG "PHY: "
 #define OSDP_PKT_MARK                  0xFF
 #define OSDP_PKT_SOM                   0x53
 #define PKT_CONTROL_SQN                0x03
@@ -55,10 +53,10 @@ int osdp_phy_packet_get_data_offset(struct osdp_pd *pd, const uint8_t *buf)
 	struct osdp_packet_header *pkt;
 
 	ARG_UNUSED(pd);
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	mark_byte_len = 1;
-	buf += 1;
-#endif
+	if (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) {
+		mark_byte_len = 1;
+		buf += 1;
+	}
 	pkt = (struct osdp_packet_header *)buf;
 	if (pkt->control & PKT_CONTROL_SCB) {
 		sb_len = pkt->data[0];
@@ -71,9 +69,9 @@ uint8_t *osdp_phy_packet_get_smb(struct osdp_pd *pd, const uint8_t *buf)
 	struct osdp_packet_header *pkt;
 
 	ARG_UNUSED(pd);
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	buf += 1;
-#endif
+	if (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) {
+		buf += 1;
+	}
 	pkt = (struct osdp_packet_header *)buf;
 	if (pkt->control & PKT_CONTROL_SCB) {
 		return pkt->data;
@@ -98,15 +96,22 @@ int osdp_phy_packet_init(struct osdp_pd *pd, uint8_t *buf, int max_len)
 	pd_mode = ISSET_FLAG(pd, PD_FLAG_PD_MODE);
 	exp_len = sizeof(struct osdp_packet_header) + 64; /* 64 is estimated */
 	if (max_len < exp_len) {
-		LOG_INF(TAG "packet_init: out of space! CMD: %02x", pd->cmd_id);
+		LOG_ERR("packet_init: out of space! CMD: %02x", pd->cmd_id);
 		return OSDP_ERR_PKT_FMT;
 	}
 
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	buf[0] = OSDP_PKT_MARK;
-	buf++;
-	mark_byte_len = 1;
-#endif
+	/**
+	 * In PD mode just follow what we received from CP. In CP mode, as we
+	 * initiate the transaction, choose based on CONFIG_OSDP_SKIP_MARK_BYTE.
+	 */
+	if ((pd_mode && ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) ||
+	    (!pd_mode && !ISSET_FLAG(pd, PD_FLAG_PKT_SKIP_MARK))) {
+		buf[0] = OSDP_PKT_MARK;
+		buf++;
+		mark_byte_len = 1;
+		SET_FLAG(pd, PD_FLAG_PKT_HAS_MARK);
+	}
+
 	/* Fill packet header */
 	pkt = (struct osdp_packet_header *)buf;
 	pkt->som = OSDP_PKT_SOM;
@@ -146,24 +151,25 @@ int osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
 
 	/* Do a sanity check only; we expect expect header to be prefilled */
 	if ((unsigned long)len <= sizeof(struct osdp_packet_header)) {
-		LOG_ERR(TAG "packet_finalize: Invalid header");
+		LOG_ERR("PKT_F: Invalid header");
 		return OSDP_ERR_PKT_FMT;
 	}
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	if (buf[0] != OSDP_PKT_MARK) {
-		LOG_ERR(TAG "packet_finalize: header MARK validation failed! "
-			"ID: 0x%02x", is_cmd ? pd->cmd_id : pd->reply_id);
-		return OSDP_ERR_PKT_FMT;
+
+	if (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) {
+		if (buf[0] != OSDP_PKT_MARK) {
+			LOG_ERR("PKT_F: MARK validation failed! ID: 0x%02x",
+				is_cmd ? pd->cmd_id : pd->reply_id);
+			return OSDP_ERR_PKT_FMT;
+		}
+		/* temporarily get rid of mark byte */
+		buf += 1;
+		len -= 1;
+		max_len -= 1;
 	}
-	/* temporarily get rid of mark byte */
-	buf += 1;
-	len -= 1;
-	max_len -= 1;
-#endif
 	pkt = (struct osdp_packet_header *)buf;
 	if (pkt->som != OSDP_PKT_SOM) {
-		LOG_ERR(TAG "packet_finalize: header SOM validation failed! "
-			"ID: 0x%02x", is_cmd ? pd->cmd_id : pd->reply_id);
+		LOG_ERR("PKT_F: header SOM validation failed! ID: 0x%02x",
+			is_cmd ? pd->cmd_id : pd->reply_id);
 		return OSDP_ERR_PKT_FMT;
 	}
 
@@ -225,22 +231,22 @@ int osdp_phy_packet_finalize(struct osdp_pd *pd, uint8_t *buf,
 	buf[len + 1] = BYTE_1(crc16);
 	len += 2;
 
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	len += 1; /* put back mark byte */
-#endif
+	if (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) {
+		len += 1; /* put back mark byte */
+	}
+
 	return len;
 
 out_of_space_error:
-	LOG_ERR(TAG "packet_finalize: Out of buffer space! "
-		"CMD: %02x", pd->cmd_id);
+	LOG_ERR("PKT_F: Out of buffer space! CMD(%02x)", pd->cmd_id);
 	return OSDP_ERR_PKT_FMT;
 }
 
-int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len)
+int osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
+			  int *one_pkt_len)
 {
-	uint8_t *data, *mac, *buf_start = buf;
 	uint16_t comp, cur;
-	int pkt_len, pd_mode, pd_addr, mac_offset, is_cmd;
+	int pd_addr, pkt_len;
 	struct osdp_packet_header *pkt;
 
 	/* wait till we have the header */
@@ -249,115 +255,148 @@ int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len)
 		return OSDP_ERR_PKT_WAIT;
 	}
 
-#ifndef CONFIG_OSDP_SKIP_MARK_BYTE
-	if (buf[0] != OSDP_PKT_MARK) {
-		LOG_ERR(TAG "Invalid MARK 0x%02x", buf[0]);
-		return OSDP_ERR_PKT_FMT;
+	CLEAR_FLAG(pd, PD_FLAG_PKT_HAS_MARK);
+	if (buf[0] == OSDP_PKT_MARK) {
+		buf += 1;
+		len -= 1;
+		SET_FLAG(pd, PD_FLAG_PKT_HAS_MARK);
 	}
-	/* Consume mark byte */
-	buf += 1;
-	len -= 1;
-#endif
 
 	pkt = (struct osdp_packet_header *)buf;
 
 	/* validate packet header */
 	if (pkt->som != OSDP_PKT_SOM) {
-		LOG_ERR(TAG "Invalid SOM 0x%02x", pkt->som);
+		LOG_ERR("Invalid SOM 0x%02x", pkt->som);
 		return OSDP_ERR_PKT_FMT;
 	}
-	pd_mode = ISSET_FLAG(pd, PD_FLAG_PD_MODE);
-	if (!pd_mode && !(pkt->pd_address & 0x80)) {
-		LOG_ERR(TAG "reply without MSB set 0x%02x", pkt->pd_address);
+
+	if (!ISSET_FLAG(pd, PD_FLAG_PD_MODE) &&
+	    !(pkt->pd_address & 0x80)) {
+		LOG_ERR("Reply without address MSB set!", pkt->pd_address);
 		return OSDP_ERR_PKT_FMT;
 	}
 
 	/* validate packet length */
 	pkt_len = (pkt->len_msb << 8) | pkt->len_lsb;
-	if (pkt_len != len) {
+	if (len < pkt_len) {
 		/* wait for more data? */
 		return OSDP_ERR_PKT_WAIT;
+	}
+
+	*one_pkt_len = pkt_len + (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK) ? 1 : 0);
+
+	/* validate CRC/checksum */
+	if (pkt->control & PKT_CONTROL_CRC) {
+		pkt_len -= 2; /* consume CRC */
+		cur = (buf[pkt_len + 1] << 8) | buf[pkt_len];
+		comp = osdp_compute_crc16(buf, pkt_len);
+		if (comp != cur) {
+			LOG_ERR("Invalid crc 0x%04x/0x%04x", comp, cur);
+			pd->reply_id = REPLY_NAK;
+			pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
+			return OSDP_ERR_PKT_CHECK;
+		}
+	} else {
+		pkt_len -= 1; /* consume checksum */
+		cur = buf[pkt_len];
+		comp = osdp_compute_checksum(buf, pkt_len);
+		if (comp != cur) {
+			LOG_ERR("Invalid checksum %02x/%02x", comp, cur);
+			pd->reply_id = REPLY_NAK;
+			pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
+			return OSDP_ERR_PKT_CHECK;
+		}
 	}
 
 	/* validate PD address */
 	pd_addr = pkt->pd_address & 0x7F;
 	if (pd_addr != pd->address && pd_addr != 0x7F) {
 		/* not addressed to us and was not broadcasted */
-		if (!pd_mode) {
-			LOG_ERR(TAG "invalid pd address %d", pd_addr);
+		if (!ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
+			LOG_ERR("Invalid pd address %d", pd_addr);
 			return OSDP_ERR_PKT_FMT;
 		}
-		LOG_DBG(TAG "cmd for PD[%d] discarded", pd_addr);
 		return OSDP_ERR_PKT_SKIP;
 	}
 
 	/* validate sequence number */
-	cur = pkt->control & PKT_CONTROL_SQN;
-	if (pd_mode && cur == 0) {
-		/**
-		 * CP is trying to restart communication by sending a 0. The
-		 * current PD implementation does not hold any state between
-		 * commands so we can just set seq_number to -1 (so it gets
-		 * incremented to 0 with a call to phy_get_seq_number()) and
-		 * invalidate any established secure channels.
-		 */
-		pd->seq_number = -1;
-		CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
-	}
-	if (pd_mode && cur == pd->seq_number) {
-		/**
-		 * TODO: PD must resend the last response if CP send the same
-		 * sequence number again.
-		 */
-		LOG_ERR(TAG "seq-repeat reply-resend feature not supported!");
-		pd->reply_id = REPLY_NAK;
-		pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
-		return OSDP_ERR_PKT_FMT;
-	}
-	comp = osdp_phy_get_seq_number(pd, pd_mode);
-	if (comp != cur && !ISSET_FLAG(pd, PD_FLAG_SKIP_SEQ_CHECK)) {
-		LOG_ERR(TAG "packet seq mismatch %d/%d", comp, cur);
-		pd->reply_id = REPLY_NAK;
-		pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
-		return OSDP_ERR_PKT_FMT;
-	}
-	len -= sizeof(struct osdp_packet_header); /* consume header */
-
-	/* validate CRC/checksum */
-	if (pkt->control & PKT_CONTROL_CRC) {
-		cur = (buf[pkt_len - 1] << 8) | buf[pkt_len - 2];
-		comp = osdp_compute_crc16(buf, pkt_len - 2);
-		if (comp != cur) {
-			LOG_ERR(TAG "invalid crc 0x%04x/0x%04x", comp, cur);
+	comp = pkt->control & PKT_CONTROL_SQN;
+	if (ISSET_FLAG(pd, PD_FLAG_PD_MODE)) {
+		if (comp == 0) {
+			/**
+			* CP is trying to restart communication by sending a 0.
+			* The current PD implementation does not hold any state
+			* between commands so we can just set seq_number to -1
+			* (so it gets incremented to 0 with a call to
+			* phy_get_seq_number()) and invalidate any established
+			* secure channels.
+			*/
+			pd->seq_number = -1;
+			CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
+		}
+		if (comp == pd->seq_number) {
+			/**
+			* TODO: PD must resend the last response if CP send the
+			* same sequence number again.
+			*/
+			LOG_ERR("seq-repeat/reply-resend not supported!");
 			pd->reply_id = REPLY_NAK;
-			pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
+			pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
 			return OSDP_ERR_PKT_FMT;
 		}
-		mac_offset = pkt_len - 4 - 2;
-		len -= 2; /* consume CRC */
 	} else {
-		comp = osdp_compute_checksum(buf, pkt_len - 1);
-		if (comp != buf[len - 1]) {
-			LOG_ERR(TAG "invalid checksum %02x/%02x", comp, cur);
-			pd->reply_id = REPLY_NAK;
-			pd->ephemeral_data[0] = OSDP_PD_NAK_MSG_CHK;
-			return OSDP_ERR_PKT_FMT;
+		if (comp == 0) {
+			/**
+			 * Check for receiving a busy reply from the PD which would
+			 * have a sequence number of 0, come in an unsecured packet
+			 * of minimum length, and have the reply ID REPLY_BUSY.
+			 */
+			if ((pkt_len == 6) && (pkt->data[0] == REPLY_BUSY)) {
+				pd->seq_number -= 1;
+				return OSDP_ERR_PKT_BUSY;
+			}
 		}
-		mac_offset = pkt_len - 4 - 1;
-		len -= 1; /* consume checksum */
+	}
+	cur = osdp_phy_get_seq_number(pd, ISSET_FLAG(pd, PD_FLAG_PD_MODE));
+	if (cur != comp && !ISSET_FLAG(pd, PD_FLAG_SKIP_SEQ_CHECK)) {
+		LOG_ERR("packet seq mismatch %d/%d", cur, comp);
+		pd->reply_id = REPLY_NAK;
+		pd->ephemeral_data[0] = OSDP_PD_NAK_SEQ_NUM;
+		return OSDP_ERR_PKT_FMT;
 	}
 
+	return OSDP_ERR_PKT_NONE;
+}
+
+int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len,
+			   uint8_t **pkt_start)
+{
+	uint8_t *data, *mac;
+	int mac_offset, is_cmd;
+	struct osdp_packet_header *pkt;
+
+	if (ISSET_FLAG(pd, PD_FLAG_PKT_HAS_MARK)) {
+		/* Consume mark byte */
+		buf += 1;
+		len -= 1;
+	}
+
+	pkt = (struct osdp_packet_header *)buf;
+	len -= pkt->control & PKT_CONTROL_CRC ? 2 : 1;
+	mac_offset = len - 4;
 	data = pkt->data;
+	len -= sizeof(struct osdp_packet_header);
 
 	if (pkt->control & PKT_CONTROL_SCB) {
-		if (pd_mode && !ISSET_FLAG(pd, PD_FLAG_SC_CAPABLE)) {
-			LOG_ERR(TAG "PD is not SC capable");
+		if (ISSET_FLAG(pd, PD_FLAG_PD_MODE) &&
+		    !ISSET_FLAG(pd, PD_FLAG_SC_CAPABLE)) {
+			LOG_ERR("PD is not SC capable");
 			pd->reply_id = REPLY_NAK;
 			pd->ephemeral_data[0] = OSDP_PD_NAK_SC_UNSUP;
 			return OSDP_ERR_PKT_FMT;
 		}
 		if (pkt->data[1] < SCS_11 || pkt->data[1] > SCS_18) {
-			LOG_ERR(TAG "invalid SB Type");
+			LOG_ERR("Invalid SB Type");
 			pd->reply_id = REPLY_NAK;
 			pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
 			return OSDP_ERR_PKT_FMT;
@@ -379,7 +418,7 @@ int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len)
 		len -= pkt->data[0]; /* consume security block */
 	} else {
 		if (ISSET_FLAG(pd, PD_FLAG_SC_ACTIVE)) {
-			LOG_ERR(TAG "Received plain-text message in SC");
+			LOG_ERR("Received plain-text message in SC");
 			pd->reply_id = REPLY_NAK;
 			pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
 			return OSDP_ERR_PKT_FMT;
@@ -394,7 +433,8 @@ int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len)
 		osdp_compute_mac(pd, is_cmd, buf, mac_offset);
 		mac = is_cmd ? pd->sc.c_mac : pd->sc.r_mac;
 		if (memcmp(buf + mac_offset, mac, 4) != 0) {
-			LOG_ERR(TAG "invalid MAC");
+			LOG_ERR("Invalid MAC; discarding SC");
+			CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
 			pd->reply_id = REPLY_NAK;
 			pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
 			return OSDP_ERR_PKT_FMT;
@@ -407,24 +447,34 @@ int osdp_phy_decode_packet(struct osdp_pd *pd, uint8_t *buf, int len)
 			 * Only the data portion of message (after id byte)
 			 * is encrypted. While (en/de)crypting, we must skip
 			 * header (6), security block (2) and cmd/reply id (1)
-			 * bytes if cmd/reply has no data, use SCS_15/SCS_16.
+			 * bytes.
 			 *
 			 * At this point, the header and security block is
 			 * already consumed. So we can just skip the cmd/reply
 			 * ID (data[0])  when calling osdp_decrypt_data().
 			 */
 			len = osdp_decrypt_data(pd, is_cmd, data + 1, len - 1);
-			if (len <= 0) {
-				LOG_ERR(TAG "failed at decrypt");
+			if (len < 0) {
+				LOG_ERR("Failed at decrypt; discarding SC");
+				CLEAR_FLAG(pd, PD_FLAG_SC_ACTIVE);
 				pd->reply_id = REPLY_NAK;
 				pd->ephemeral_data[0] = OSDP_PD_NAK_SC_COND;
 				return OSDP_ERR_PKT_FMT;
+			}
+			if (len == 0) {
+				/**
+				 * If cmd/reply has no data, PD "should" have
+				 * used SCS_15/SCS_16 but we will be tolerant
+				 * towards those faulty implementations.
+				 */
+				LOG_INF("Received encrypted data block with 0 "
+					"length; tolerating non-conformance!");
 			}
 			len += 1; /* put back cmd/reply ID */
 		}
 	}
 
-	memmove(buf_start, data, len);
+	*pkt_start = data;
 	return len;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +23,7 @@ void test_start(struct test *t)
 	t->tests = 0;
 	t->success = 0;
 	t->failure = 0;
+	t->loglevel = LOG_INFO;
 }
 
 int test_end(struct test *t)
@@ -57,6 +58,8 @@ int main(int argc, char *argv[])
 	run_cp_fsm_tests(&t);
 
 	run_mixed_fsm_tests(&t);
+
+	run_osdp_commands_tests(&t);
 
 	return test_end(&t);
 }

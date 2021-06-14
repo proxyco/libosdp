@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include <utils/utils.h>
 #include <utils/queue.h>
@@ -51,12 +52,41 @@
 #define AES_PAD_LEN(x)                 ((x + 16 - 1) & (~(16 - 1)))
 #define NUM_PD(ctx)                    (TO_CP(ctx)->num_pd)
 
+#define OSDP_QUEUE_SLAB_SIZE (OSDP_CP_CMD_POOL_SIZE * \
+			      (sizeof(struct osdp_cmd) + \
+			       sizeof(queue_node_t)))
+
+#define safe_free(p)			if (p) free(p)
+
 /* Unused type only to estmate ephemeral_data size */
 union osdp_ephemeral_data {
 	struct osdp_cmd cmd;
 	struct osdp_event event;
 };
 #define OSDP_EPHEMERAL_DATA_MAX_LEN      sizeof(union osdp_ephemeral_data)
+
+/**
+ * OSDP application exposed methor arg checker.
+ *
+ * Usage:
+ *    input_check(ctx);
+ *    input_check(ctx, pd);
+ */
+#define input_check_osdp_ctx(ctx) \
+		assert(ctx)
+#define input_check_pd_offset(pd)	\
+		if (pd < 0 || pd >= NUM_PD(ctx)) { \
+			LOG_ERR("Invalid PD number"); \
+			return -1; \
+		}
+#define input_check2(_1, _2) \
+		input_check_osdp_ctx(_1); \
+		input_check_pd_offset(_2);
+#define input_check1(_1) \
+		input_check_osdp_ctx(_1);
+#define get_macro(_1,_2,macro,...) macro
+#define input_check(...) get_macro(__VA_ARGS__, \
+		input_check2, input_check1)(__VA_ARGS__)
 
 /**
  * @brief OSDP reserved commands
@@ -87,10 +117,12 @@ union osdp_ephemeral_data {
 #define CMD_SCRYPT              0x77
 #define CMD_CONT                0x79
 #define CMD_ABORT               0x7A
-#define CMD_MAXREPLY            0x7B
+#define CMD_FILETRANSFER        0x7C
+#define CMD_ACURXSIZE           0x7B
 #define CMD_MFG                 0x80
 #define CMD_SCDONE              0xA0
 #define CMD_XWR                 0xA1
+#define CMD_KEEPACTIVE          0xA7
 
 /**
  * @brief OSDP reserved responses
@@ -114,6 +146,7 @@ union osdp_ephemeral_data {
 #define REPLY_BIOMATCHR         0x58
 #define REPLY_CCRYPT            0x76
 #define REPLY_RMAC_I            0x78
+#define REPLY_FTSTAT            0x7A
 #define REPLY_MFGREP            0x90
 #define REPLY_BUSY              0x79
 #define REPLY_XRD               0xB1
@@ -133,6 +166,7 @@ union osdp_ephemeral_data {
 
 /* Global flags */
 #define FLAG_CP_MODE            0x00000001 /* Set when initialized as CP */
+#define FLAG_SC_DISABLED        0x00000002 /* cp_setup with master_key=NULL */
 
 /* PD State Flags */
 #define PD_FLAG_MASK            0x0000FFFF /* only 16 bits are for flags */
@@ -147,17 +181,20 @@ union osdp_ephemeral_data {
 #define PD_FLAG_SC_SCBKD_DONE   0x00000100 /* SCBKD check is done */
 #define PD_FLAG_PD_MODE         0x00000200 /* device is setup as PD */
 #define PD_FLAG_CHN_SHARED      0x00000400 /* PD's channel is shared */
+#define PD_FLAG_PKT_SKIP_MARK   0x00000800 /* CONFIG_OSDP_SKIP_MARK_BYTE */
+#define PD_FLAG_PKT_HAS_MARK    0x00001000 /* Packet has mark byte */
+#define PD_FLAG_HAS_SCBK        0x00002000 /* PD has a dedicated SCBK */
 
 /* logging short hands */
-#define LOG_EM(...)	(osdp_log(LOG_EMERG, __VA_ARGS__))
-#define LOG_ALERT(...)	(osdp_log(LOG_ALERT, __VA_ARGS__))
-#define LOG_CRIT(...)	(osdp_log(LOG_CRIT, __VA_ARGS__))
-#define LOG_ERR(...)	(osdp_log(LOG_ERR, __VA_ARGS__))
-#define LOG_INF(...)	(osdp_log(LOG_INFO, __VA_ARGS__))
-#define LOG_WRN(...)	(osdp_log(LOG_WARNING, __VA_ARGS__))
-#define LOG_NOT(...)	(osdp_log(LOG_NOTICE, __VA_ARGS__))
-#define LOG_DBG(...)	(osdp_log(LOG_DEBUG, __VA_ARGS__))
-#define LOG_PRINT(...)	(osdp_log(-1, __VA_ARGS__))
+#define LOG_EM(...)	(osdp_log(LOG_EMERG,  LOG_TAG __VA_ARGS__))
+#define LOG_ALERT(...)	(osdp_log(LOG_ALERT,  LOG_TAG __VA_ARGS__))
+#define LOG_CRIT(...)	(osdp_log(LOG_CRIT,   LOG_TAG __VA_ARGS__))
+#define LOG_ERR(...)	(osdp_log(LOG_ERROR,  LOG_TAG __VA_ARGS__))
+#define LOG_INF(...)	(osdp_log(LOG_INFO,   LOG_TAG __VA_ARGS__))
+#define LOG_WRN(...)	(osdp_log(LOG_WARNING,LOG_TAG __VA_ARGS__))
+#define LOG_NOT(...)	(osdp_log(LOG_NOTICE, LOG_TAG __VA_ARGS__))
+#define LOG_DBG(...)	(osdp_log(LOG_DEBUG,  LOG_TAG __VA_ARGS__))
+#define LOG_PRINT(...)	(osdp_log(-1,         LOG_TAG __VA_ARGS__))
 
 #define osdp_dump(b, l, f, ...) hexdump(b, l, f, __VA_ARGS__)
 
@@ -179,11 +216,11 @@ enum osdp_pd_nak_code_e {
 	 */
 	OSDP_PD_NAK_CMD_UNKNOWN,
 	/**
-	 * @brief Unexpected sequence number detected in the header
+	 * @brief Sequence number error
 	 */
 	OSDP_PD_NAK_SEQ_NUM,
 	/**
-	 * @brief Unexpected sequence number detected in the header
+	 * @brief Secure Channel is not supported by PD
 	 */
 	OSDP_PD_NAK_SC_UNSUP,
 	/**
@@ -210,6 +247,7 @@ enum osdp_pd_nak_code_e {
 
 enum osdp_pd_state_e {
 	OSDP_PD_STATE_IDLE,
+	OSDP_PD_STATE_PROCESS_CMD,
 	OSDP_PD_STATE_SEND_REPLY,
 	OSDP_PD_STATE_ERR,
 };
@@ -235,9 +273,18 @@ enum osdp_state_e {
 };
 
 enum osdp_pkt_errors_e {
+	/* Define the busy error to a +ve value to indicate no error.  Also set it
+	 * to 2 which is the value of OSDP_CP_ERR_RETRY_CMD which is the error
+	 * code returned by cp_decode_response() after decoding the busy reply
+	 * packet.  This thus allows a busy reply packet to be detected and
+	 * handled without needing the usual additional decoding step. */
+	OSDP_ERR_PKT_BUSY  = 2,
+
+	OSDP_ERR_PKT_NONE  = 0,
 	OSDP_ERR_PKT_FMT   = -1,
 	OSDP_ERR_PKT_WAIT  = -2,
-	OSDP_ERR_PKT_SKIP  = -3
+	OSDP_ERR_PKT_SKIP  = -3,
+	OSDP_ERR_PKT_CHECK = -4
 };
 
 struct osdp_slab {
@@ -264,6 +311,7 @@ struct osdp_secure_channel {
 struct osdp_queue {
 	queue_t queue;
 	slab_t slab;
+	uint8_t slab_blob[OSDP_QUEUE_SLAB_SIZE];
 };
 
 struct osdp_pd {
@@ -281,9 +329,12 @@ struct osdp_pd {
 	/* PD state management */
 	int state;
 	int phy_state;
+	uint32_t wait_ms;
 
 	int64_t tstamp;
 	int64_t sc_tstamp;
+
+	uint16_t peer_rx_size;
 	uint8_t rx_buf[OSDP_PACKET_BUF_SIZE];
 	int rx_buf_len;
 	int64_t phy_tstamp;
@@ -301,6 +352,7 @@ struct osdp_pd {
 	struct osdp_secure_channel sc;
 	void *command_callback_arg;
 	pd_commnand_callback_t command_callback;
+	struct osdp_file *file;
 };
 
 struct osdp_cp {
@@ -319,13 +371,14 @@ struct osdp {
 	struct osdp_cp *cp;
 	struct osdp_pd *pd;
 	uint8_t sc_master_key[16];
+	osdp_command_complete_callback_t command_complete_callback;
 };
 
 enum log_levels_e {
 	LOG_EMERG,
 	LOG_ALERT,
 	LOG_CRIT,
-	LOG_ERR,
+	LOG_ERROR,
 	LOG_WARNING,
 	LOG_NOTICE,
 	LOG_INFO,
@@ -337,13 +390,16 @@ enum log_levels_e {
 int osdp_phy_packet_init(struct osdp_pd *p, uint8_t *buf, int max_len);
 int osdp_phy_packet_finalize(struct osdp_pd *p, uint8_t *buf,
 			       int len, int max_len);
-int osdp_phy_decode_packet(struct osdp_pd *p, uint8_t *buf, int len);
+int osdp_phy_check_packet(struct osdp_pd *pd, uint8_t *buf, int len,
+			  int *one_pkt_len);
+int osdp_phy_decode_packet(struct osdp_pd *p, uint8_t *buf, int len,
+			   uint8_t **pkt_start);
 void osdp_phy_state_reset(struct osdp_pd *pd);
 int osdp_phy_packet_get_data_offset(struct osdp_pd *p, const uint8_t *buf);
 uint8_t *osdp_phy_packet_get_smb(struct osdp_pd *p, const uint8_t *buf);
 
 /* from osdp_sc.c */
-void osdp_compute_scbk(struct osdp_pd *p, uint8_t *scbk);
+void osdp_compute_scbk(struct osdp_pd *p, uint8_t *master_key, uint8_t *scbk);
 void osdp_compute_session_keys(struct osdp *ctx);
 void osdp_compute_cp_cryptogram(struct osdp_pd *p);
 int osdp_verify_cp_cryptogram(struct osdp_pd *p);
@@ -356,16 +412,15 @@ int osdp_compute_mac(struct osdp_pd *p, int is_cmd, const uint8_t *data, int len
 void osdp_sc_init(struct osdp_pd *p);
 
 /* from osdp_common.c */
-int64_t osdp_millis_now(void);
+__weak int64_t osdp_millis_now(void);
 int64_t osdp_millis_since(int64_t last);
 uint16_t osdp_compute_crc16(const uint8_t *buf, size_t len);
 void osdp_log(int log_level, const char *fmt, ...);
 void osdp_log_ctx_set(int log_ctx);
 void osdp_log_ctx_reset();
 void osdp_log_ctx_restore();
-void osdp_encrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len);
-void osdp_decrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len);
-void osdp_get_rand(uint8_t *buf, int len);
-void safe_free(void *p);
+__weak void osdp_encrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len);
+__weak void osdp_decrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len);
+__weak void osdp_get_rand(uint8_t *buf, int len);
 
 #endif	/* _OSDP_COMMON_H_ */

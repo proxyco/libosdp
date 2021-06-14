@@ -1,11 +1,11 @@
 #
-#  Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
 
 cmake_minimum_required(VERSION 3.0)
-project(osdp_sample)
+project(osdp_c_sample)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 	# This sample is built individually so try to locate an installed
@@ -22,8 +22,8 @@ else()
 	link_directories(${LIBOSDP_LIBRARY_DIR})
 endif()
 
-set(CP_SAMPLE cp_sample)
-set(PD_SAMPLE pd_sample)
+set(CP_SAMPLE c_cp_sample)
+set(PD_SAMPLE c_pd_sample)
 
 include_directories(${LIBOSDP_INCLUDE_DIR} ${CMAKE_SOURCE_DIRECTORY}/include)
 

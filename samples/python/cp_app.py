@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2020 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+#  Copyright (c) 2020-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
 #
 #  SPDX-License-Identifier: Apache-2.0
 #
@@ -37,7 +37,7 @@ text_cmd = {
 led_cmd = {
     "command": osdp.CMD_LED,
     "reader": 1,
-    "led_number": 1,
+    "led_number": 0,
     "control_code": 1,
     "on_count": 10,
     "off_count": 10,
@@ -56,7 +56,7 @@ comset_cmd = {
 keyset_cmd = {
     "command": osdp.CMD_KEYSET,
     "type": 1,
-    "data": "01020304050607080910111213141517"
+    "data": bytes([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16])
 }
 
 mfg_cmd = {
@@ -77,9 +77,9 @@ pd_info = [
     }
 ]
 
-key = '01020304050607080910111213141516'
+key = bytes([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16])
 
-commands = [ output_cmd, buzzer_cmd, text_cmd, led_cmd, comset_cmd, mfg_cmd ]
+commands = [ output_cmd, buzzer_cmd, text_cmd, led_cmd, comset_cmd, mfg_cmd, keyset_cmd ]
 
 def event_handler(address, event):
     print("Address: ", address, " Event: ", event)

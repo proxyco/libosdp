@@ -78,6 +78,7 @@ of the protocol support only the most common among them. You can see a
    api/peripheral-device
    api/miscellaneous
    api/command-structure
+   api/channel
 
 .. toctree::
    :caption: osdpctl
@@ -93,4 +94,3 @@ of the protocol support only the most common among them. You can see a
 
    changelog
    license
-   todo

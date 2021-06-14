@@ -69,22 +69,45 @@ commands and replies and their support status in LibOSDP [here][22].
 
   * cmake3 (host)
   * python3 (host, optional)
-  * OpenSSL (host and target, optional)
+  * python3-pip (host, optional)
+  * doxygen (host, optional)
+  * OpenSSL (host and target, optional - recommended)
   * [goToMain/C-Utils][25] (host, submodule)
+
+### For ubuntu
+
+```sh
+sudo apt install cmake python3 python3-pip python3-dev libssl-dev doxygen
+```
 
 ## Compile LibOSDP
 
-To build libosdp you must have cmake-3.0 (or above) and a C compiler installed.
-This repository produces a `libosdpstatic.a` and `libosdp.so`. You can link
-these with your application as needed (-losdp or -losdpstatic). Have a look at
-`sample/* for a quick lookup on how to consume this library and structure your
-application.
+LibOSDP provides a lean-build that only builds the core library and nothing
+else. This is useful if you are cross compiling as it doesn't have any other
+dependencies but a C compiler. Here is an example of how you can cross compile
+LibOSDP to `arm-none-eabi-gcc`.
+
+```
+export CROS_COMPILE=arm-none-eabi-
+export CCFLAGS=--specs=nosys.specs
+./configure
+make
+```
+
+To build libosdp and all its components you must have cmake-3.0 (or above) and
+a C compiler installed.  This repository produces a `libosdp.so` and
+`libosdpstatic.a`; so depending on on your needs you can link these with -losdp
+or -losdpstatic, respectively.
+
+Have a look at `sample/* for a quick lookup on how to consume this library and
+structure your application.
 
 You can also read the [API documentation][26] for a comprehensive list of APIs
 that are exposed by libosdp.
 
 ```sh
 git clone https://github.com/goToMain/libosdp --recurse-submodules
+# git submodule update --init (if you missed doing --recurse-submodules earlier)
 cd libosdp
 mkdir build && cd build
 cmake ..
@@ -97,6 +120,15 @@ make DESTDIR=/your/install/path install
 
 Refer to [this document][23] for more information on build and cross
 compilation.
+
+### Build HTML docs
+
+```sh
+pip3 install -r doc/requirements.txt
+mkdir build && cd build
+cmake ..
+make html_docs # output in ./docs/sphinx/
+```
 
 ## Contributions, Issues and Bugs
 

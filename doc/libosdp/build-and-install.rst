@@ -14,6 +14,18 @@ these with your application as needed (-losdp or -losdpstatic). Have a look at
     make check
     make DESTDIR=/your/install/path install
 
+Build html docs
+---------------
+
+HTML docs of LibOSDP depends on python3, pip3, doxygen, sphinx, and breathe.
+
+.. code:: sh
+
+    pip3 install -r requirements.txt
+    mkdir build && cd build
+    cmake ..
+    make html_docs
+
 Compile-time configuration options
 ----------------------------------
 
@@ -25,9 +37,13 @@ the flag ``-DCONFIG_OSDP_BUILD_STATIC=ON`` to cmake.
 +-------------------------------+-----------+-------------------------------------------+
 | OPTION                        | Default   | Description                               |
 +===============================+===========+===========================================+
-| CONFIG\_OSDP\_PACKET\_TRACE   | OFF       | Enable raw packet trace for diagnostics   |
+| CONFIG_OSDP_PACKET_TRACE      | OFF       | Enable raw packet trace for diagnostics   |
 +-------------------------------+-----------+-------------------------------------------+
-| CONFIG_OSDP_SC_ENABLE         | ON        | Enable secure channel communication       |
+| CONFIG_OSDP_SKIP_MARK_BYTE    | OFF       | Don't send the leading mark byte (0xFF)   |
++-------------------------------+-----------+-------------------------------------------+
+| CONFIG_DISABLE_PRETTY_LOGGING | OFF       | Don't colourize log outputs               |
++-------------------------------+-----------+-------------------------------------------+
+| CONFIG_OSDP_STATIC_PD         | OFF       | Setup PD single statically                |
 +-------------------------------+-----------+-------------------------------------------+
 
 Add LibOSDP to your cmake project
@@ -48,8 +64,8 @@ super simple. First off, add the following to your CMakeLists.txt
         BUILD_COMMAND     make
         INSTALL_COMMAND   make install DESTDIR=${CMAKE_BINARY_DIR}/libosdp/install
     )
-    include_directories("${CMAKE_BINARY_DIR}/libosdp/install/include")
-    link_directories("${CMAKE_BINARY_DIR}/libosdp/install/lib")
+    include_directories("${CMAKE_BINARY_DIR}/libosdp/install/usr/local/include")
+    link_directories("${CMAKE_BINARY_DIR}/libosdp/install/usr/local/lib")
 
 Next you must add ``ext_libosdp`` as a dependency to your target. That
 it! now you can link your application to osdp library. Following example shows

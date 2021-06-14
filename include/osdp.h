@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Siddharth Chandrasekaran <siddharth@embedjournal.com>
+ * Copyright (c) 2019-2021 Siddharth Chandrasekaran <sidcha.dev@gmail.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 #define OSDP_CMD_TEXT_MAX_LEN          32
-#define OSDP_CMD_KEYSET_KEY_MAX_LEN    32
+#define OSDP_CMD_KEYSET_KEY_MAX_LEN    16
 #define OSDP_CMD_MFG_MAX_DATALEN       64
 #define OSDP_EVENT_MAX_DATALEN         64
 
@@ -27,6 +27,7 @@ extern "C" {
  * possible. Fail where these assumptions don't hold.
  *   - Don't allow use of SCBK-D.
  *   - Assume that a KEYSET was successful at an earlier time.
+ *   - Disallow master key based SCBK derivation.
  *
  * @note This flag is recommended in production use.
  */
@@ -183,54 +184,66 @@ struct osdp_pd_id {
 	uint32_t firmware_version;
 };
 
+/**
+ * @brief pointer to function that copies received bytes into buffer. This
+ * function should be non-blocking.
+ *
+ * @param data for use by underlying layers. osdp_channel::data is passed
+ * @param buf byte array copy incoming data
+ * @param len sizeof `buf`. Can copy utmost `len` bytes into `buf`
+ *
+ * @retval +ve: number of bytes copied on to `buf`. Must be <= `len`
+ * @retval -ve on errors
+ */
+typedef int (*osdp_read_fn_t)(void *data, uint8_t *buf, int maxlen);
+
+/**
+ * @brief pointer to function that sends byte array into some channel. This
+ * function should be non-blocking.
+ *
+ * @param data for use by underlying layers. osdp_channel::data is passed
+ * @param buf byte array to be sent
+ * @param len number of bytes in `buf`
+ *
+ * @retval +ve: number of bytes sent. must be <= `len`
+ * @retval -ve on errors
+ */
+typedef int (*osdp_write_fn_t)(void *data, uint8_t *buf, int len);
+
+/**
+ * @brief pointer to function that drops all bytes in TX/RX fifo. This
+ * function should be non-blocking.
+ *
+ * @param data for use by underlying layers. osdp_channel::data is passed
+ */
+typedef void (*osdp_flush_fn_t)(void *data);
+
+/**
+ * @brief User defined communication channel abstaction for OSDP devices.
+ * The methods for read/write/flush are expected to be non-blocking.
+ *
+ * @param data pointer to a block of memory that will be passed to the
+ *             send/receive/flush method. This is optional (can be set to NULL)
+ * @param id on multi-drop networks, more than one PD can share the same
+ *           channel (read/write/flush pointers). On such networks, the
+ *           channel_id is used to lock a PD to a channel. On multi-drop
+ *           networks, this `id` must non-zero and be unique for each bus.
+ * @param recv Pointer to function used to receive osdp packet data
+ * @param send Pointer to function used to send osdp packet data
+ * @param flush Pointer to function used to fush the channel (optional)
+ */
 struct osdp_channel {
-	/**
-	 * @brief pointer to a block of memory that will be passed to the
-	 * send/receive method. This is optional and can be left empty.
-	 */
 	void *data;
-
-	/**
-	 * @brief on multi-drop networks, more than one PD can share the same
-	 * channel (read/write/flush pointers). On such networks, the channel_id
-	 * is used to lock a PD to a channel. On multi-drop networks, this `id`
-	 * must non-zero and be unique for each bus.
-	 */
 	int id;
-
-	/**
-	 * @brief pointer to function that copies received bytes into buffer
-	 * @param data for use by underlying layers. channel_s::data is passed
-	 * @param buf byte array copy incoming data
-	 * @param len sizeof `buf`. Can copy utmost `len` bytes into `buf`
-	 *
-	 * @retval +ve: number of bytes copied on to `bug`. Must be <= `len`
-	 * @retval -ve on errors
-	 */
-	int (*recv)(void *data, uint8_t *buf, int maxlen);
-
-	/**
-	 * @brief pointer to function that sends byte array into some channel
-	 * @param data for use by underlying layers. channel_s::data is passed
-	 * @param buf byte array to be sent
-	 * @param len number of bytes in `buf`
-	 *
-	 * @retval +ve: number of bytes sent. must be <= `len`
-	 * @retval -ve on errors
-	 */
-	int (*send)(void *data, uint8_t *buf, int len);
-
-	/**
-	 * @brief pointer to function that drops all bytes in TX/RX fifo
-	 * @param data for use by underlying layers. channel_s::data is passed
-	 */
-	void (*flush)(void *data);
+	osdp_read_fn_t recv;
+	osdp_write_fn_t send;
+	osdp_flush_fn_t flush;
 };
 
 /**
  * @brief OSDP PD Information. This struct is used to describe a PD to LibOSDP.
  *
- * @param baud_rate Can be one of 9600/38400/115200
+ * @param baud_rate Can be one of 9600/19200/38400/115200/230400
  * @param address 7 bit PD address. the rest of the bits are ignored. The
  *        special address 0x7F is used for broadcast. So there can be 2^7-1
  *        devices on a multi-drop channel
@@ -242,6 +255,9 @@ struct osdp_channel {
  *        only PD mode of operation
  * @param channel Communication channel ops structure, containing send/recv
  *        function pointers.
+ * @param scbk Pointer to 16 bytes of Secure Channel Base Key for the PD. If
+ *        non-null, this is used to set-up the secure channel instead of using
+ *        the Master Key (in case of CP).
  */
 typedef struct {
 	int baud_rate;
@@ -250,10 +266,11 @@ typedef struct {
 	struct osdp_pd_id id;
 	struct osdp_pd_cap *cap;
 	struct osdp_channel channel;
+	uint8_t *scbk;
 } osdp_pd_info_t;
 
 /**
- * The keep the OSDP internal data strucutres from polluting the exposed
+ * @brief To keep the OSDP internal data strucutres from polluting the exposed
  * headers, they are typedefed to void before sending them to the upper layers.
  * This level of abstaction looked reasonable as _technically_ no one should
  * attempt to modify it outside fo the LibOSDP and their definition may change
@@ -387,7 +404,7 @@ struct osdp_cmd_text {
  *
  * @param address Unit ID to which this PD will respond after the change takes
  *        effect.
- * @param baud_rate baud rate value 9600/38400/115200
+ * @param baud_rate baud rate value 9600/19200/38400/115200/230400
  */
 struct osdp_cmd_comset {
 	uint8_t address;
@@ -398,6 +415,7 @@ struct osdp_cmd_comset {
  * @brief This command transfers an encryption key from the CP to a PD.
  *
  * @param type Type of keys:
+ *   - 0x00 - Master Key (This is not part of OSDP Spec, see gh-issue:#42)
  *   - 0x01 – Secure Channel Base Key
  * @param length Number of bytes of key data - (Key Length in bits + 7) / 8
  * @param data Key data
@@ -425,6 +443,17 @@ struct osdp_cmd_mfg {
 };
 
 /**
+ * @brief File transfer start command
+ *
+ * @param fd Pre-agreed file ID between CP and PD.
+ * @param flags Reserved; set to 0
+ */
+struct osdp_cmd_file_tx {
+	int fd;
+	uint32_t flags;
+};
+
+/**
  * @brief OSDP application exposed commands
  */
 enum osdp_cmd_e {
@@ -435,6 +464,7 @@ enum osdp_cmd_e {
 	OSDP_CMD_KEYSET,
 	OSDP_CMD_COMSET,
 	OSDP_CMD_MFG,
+	OSDP_CMD_FILE_TX,
 	OSDP_CMD_SENTINEL
 };
 
@@ -453,13 +483,14 @@ enum osdp_cmd_e {
 struct osdp_cmd {
 	enum osdp_cmd_e id;
 	union {
-		struct osdp_cmd_led    led;
+		struct osdp_cmd_led led;
 		struct osdp_cmd_buzzer buzzer;
-		struct osdp_cmd_text   text;
+		struct osdp_cmd_text text;
 		struct osdp_cmd_output output;
 		struct osdp_cmd_comset comset;
 		struct osdp_cmd_keyset keyset;
-		struct osdp_cmd_mfg    mfg;
+		struct osdp_cmd_mfg mfg;
+		struct osdp_cmd_file_tx file_tx;
 	};
 };
 
@@ -533,12 +564,24 @@ struct osdp_event_mfgrep {
 };
 
 /**
+ * @brief OSDP File transfer status event
+ *
+ * @param fd File ID for which this event is generatated
+ * @param status 0: success; -ve on errors.
+ */
+struct osdp_event_file_tx {
+	int fd;
+	int status;
+};
+
+/**
  * @brief OSDP PD Events
  */
 enum osdp_event_type {
 	OSDP_EVENT_CARDREAD,
 	OSDP_EVENT_KEYPRESS,
 	OSDP_EVENT_MFGREP,
+	OSDP_EVENT_FILE_TX,
 	OSDP_EVENT_SENTINEL
 };
 
@@ -556,11 +599,59 @@ struct osdp_event {
 		struct osdp_event_keypress keypress;
 		struct osdp_event_cardread cardread;
 		struct osdp_event_mfgrep mfgrep;
+		struct osdp_event_file_tx file_tx;
 	};
 };
 
-typedef int (*pd_commnand_callback_t)(void *arg, struct osdp_cmd *c);
-typedef int (*cp_event_callback_t)(void *arg, int addr, struct osdp_event *ev);
+/**
+* @brief Callback for PD command notifications. After it has been registered
+* with `osdp_pd_set_command_callback`, this method is invoked when the PD
+* receives a command from the CP.
+*
+* @param arg pointer that will was passed to the arg param of
+* `osdp_pd_set_command_callback`.
+* @param cmd pointer to the received command.
+*
+* @retval 0 if LibOSDP must send a `osdp_ACK` response
+* @retval -ve if LibOSDP must send a `osdp_NAK` response
+* @retval +ve and modify the passed `struct osdp_cmd *cmd` if LibOSDP must send
+* a specific response. This is useful for sending manufacturer specific
+* reply ``osdp_MFGREP``.
+*/
+typedef int (*pd_commnand_callback_t)(void *arg, struct osdp_cmd *cmd);
+
+/**
+* @brief Callback for CP event notifications. After is has been registered with
+* `osdp_cp_set_event_callback`, this method is invoked when the CP receives an
+* event from the PD.
+*
+* @param arg pointer that will was passed to the arg param of
+* `osdp_cp_set_event_callback`.
+* @param pd PD offset number as in `pd_info_t *`.
+* @param ev pointer to osdp_event struct (filled by libosdp).
+*
+* @retval 0 on handling the event successfully.
+* @retval -ve on errors.
+*/
+typedef int (*cp_event_callback_t)(void *arg, int pd, struct osdp_event *ev);
+
+/**
+ * @brief Callback for for command completion event callbacks. After is has
+ * been registered with `osdp_set_command_complete_callback()` this method is
+ * invoked after a command has been processed successfully in CP and PD sides.
+ *
+ * @param id OSDP command ID (Note: this is not `enum osdp_cmd_e`)
+ */
+typedef void (*osdp_command_complete_callback_t)(int id);
+
+/**
+ * @brief A printf() like method that will be used to wirte out log lines.
+ *
+ * @param fmt C printf() style format string. See man 3 printf
+ *
+ * @retval number of characters written to the log stream
+ */
+typedef int (*osdp_log_fn_t)(const char *fmt, ...);
 
 /* ------------------------------- */
 /*            CP Methods           */
@@ -572,13 +663,17 @@ typedef int (*cp_event_callback_t)(void *arg, int addr, struct osdp_event *ev);
  * intact.
  *
  * @param num_pd Number of PDs connected to this CP. The `osdp_pd_info_t *` is
- *               treated as an array of length num_pd.
+ *        treated as an array of length num_pd.
  * @param info Pointer to info struct populated by application.
- * @param scbk 16 byte Secure Channel Base Key. If this field is NULL PD is set
- *             to "Install Mode".
+ * @param master_key 16 byte Master Key from which the SCBK (Secure Channel Base
+ *        KEY) is generated. If this field is NULL, then secure channel is
+ *        disabled.
  *
- * @return OSDP Context on success
- * @return NULL on errors
+ *        Note: Master key based SCBK derivation is discouraged. Pass SCBK for
+ *        each connected PD in osdp_pd_info_t::scbk.
+ *
+ * @retval OSDP Context on success
+ * @retval NULL on errors
  */
 osdp_t *osdp_cp_setup(int num_pd, osdp_pd_info_t *info, uint8_t *master_key);
 
@@ -633,13 +728,11 @@ void osdp_cp_set_event_callback(osdp_t *ctx, cp_event_callback_t cb, void *arg);
  * intact.
  *
  * @param info Pointer to iinfo struct populated by application.
- * @param scbk 16 byte Secure Channel Base Key. If this field is NULL PD is set
- *             to "Install Mode".
  *
- * @return OSDP Context on success
- * @return NULL on errors
+ * @retval OSDP Context on success
+ * @retval NULL on errors
  */
-osdp_t *osdp_pd_setup(osdp_pd_info_t * info, uint8_t *scbk);
+osdp_t *osdp_pd_setup(osdp_pd_info_t * info);
 
 /**
  * @brief Periodic refresh method. Must be called by the application at least
@@ -656,6 +749,15 @@ void osdp_pd_refresh(osdp_t *ctx);
  * @param ctx OSDP context
  */
 void osdp_pd_teardown(osdp_t *ctx);
+
+/**
+ * @brief Set PD's capabilities
+ *
+ * @param ctx OSDP context
+ * @param cap pointer to array of cap (`struct osdp_pd_cap`) terminated by a
+ *        capability with cap->function_code set to 0.
+ */
+void osdp_pd_set_capabilities(osdp_t *ctx, struct osdp_pd_cap *cap);
 
 /**
  * @brief Set callback method for PD command notification. This callback is
@@ -698,18 +800,12 @@ int osdp_pd_notify_event(osdp_t *ctx, struct osdp_event *event);
  *               buffer. Can be handy if you want to log to file on a UART
  *               device without putchar redirection.
  */
-void osdp_logger_init(int log_level, int (*log_fn)(const char *fmt, ...));
-
-/**
- * @brief A convenience macro for setting just the log level.
- * see osdp_logger_init()
- */
-#define osdp_set_log_level(l) osdp_logger_init(l, NULL)
+void osdp_logger_init(int log_level, osdp_log_fn_t log_fn);
 
 /**
  * @brief Get LibOSDP version as a `const char *`. Used in diagnostics.
  *
- * @return version string
+ * @retval version string
  */
 const char *osdp_get_version();
 
@@ -718,14 +814,14 @@ const char *osdp_get_version();
  * info about the source tree from which this version of LibOSDP was built. Used
  * in diagnostics.
  *
- * @return source identifier string
+ * @retval source identifier string
  */
 const char *osdp_get_source_info();
 
 /**
  * @brief Get a bit mask of number of PD that are online currently.
  *
- * @return Bit-Mask (max 32 PDs)
+ * @retval Bit-Mask (max 32 PDs)
  */
 uint32_t osdp_get_status_mask(osdp_t *ctx);
 
@@ -733,9 +829,37 @@ uint32_t osdp_get_status_mask(osdp_t *ctx);
  * @brief Get a bit mask of number of PD that are online and have an active
  * secure channel currently.
  *
- * @return Bit-Mask (max 32 PDs)
+ * @retval Bit-Mask (max 32 PDs)
  */
 uint32_t osdp_get_sc_status_mask(osdp_t *ctx);
+
+/**
+ * @breif Set osdp_command_complete_callback_t to susbscibe to osdp command or
+ * event completion events. This can be used to perform post command actions
+ * such as changing the baud rate of the underlying channel after a COMSET
+ * command was acknowledged/issued by a peer.
+ *
+ */
+void osdp_set_command_complete_callback(osdp_t *ctx,
+					osdp_command_complete_callback_t cb);
+
+#ifdef CONFIG_OSDP_FILE
+
+#include <stddef.h>
+#include <sys/types.h>
+
+struct osdp_file_ops {
+	int (*open)(int fd, size_t *size);
+	ssize_t (*read)(int fd, void *buf, size_t count, size_t offset);
+	ssize_t (*write)(int fd, const void *buf, size_t count, size_t offset);
+	void (*close)(int fd);
+};
+
+int osdp_file_register_ops(osdp_t *ctx, int pd, struct osdp_file_ops *ops);
+
+int osdp_file_tx_status(osdp_t *ctx, int pd, size_t *size, size_t *offset);
+
+#endif /* CONFIG_OSDP_FILE */
 
 #ifdef __cplusplus
 }
