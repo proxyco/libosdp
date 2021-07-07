@@ -5,6 +5,7 @@
  */
 
 #include "pyosdp.h"
+#include <stdio.h>
 
 #define pyosdp_cp_pd_is_online_doc \
 	"Get PD status, (online/offline)\n" \
@@ -124,6 +125,8 @@ static PyObject *pyosdp_cp_send_command(pyosdp_t *self, PyObject *args)
 	int pd;
 	PyObject *cmd_dict;
 	struct osdp_cmd cmd;
+
+	printf("Sending Command!\n");
 
 	if (!PyArg_ParseTuple(args, "IO!", &pd, &PyDict_Type, &cmd_dict))
 		return NULL;

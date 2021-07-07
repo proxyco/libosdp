@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <utils/utils.h>
 
@@ -833,6 +834,12 @@ static int pd_send_reply(struct osdp_pd *pd)
 	if (pd->channel.flush) {
 		pd->channel.flush(pd->channel.data);
 	}
+
+	LOG_INF("Reply:-\n");
+	for (int i = 0; i < len; ++i) {
+		printf("%02x ", pd->rx_buf[i]);
+	}
+	LOG_INF("\n");
 
 	ret = pd->channel.send(pd->channel.data, pd->rx_buf, len);
 	if (ret != len) {

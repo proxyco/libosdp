@@ -33,6 +33,7 @@ void osdp_compute_session_keys(struct osdp *ctx)
 	struct osdp_pd *pd = GET_CURRENT_PD(ctx);
 
 	if (ISSET_FLAG(pd, PD_FLAG_SC_USE_SCBKD)) {
+		LOG_INF("USING SCBKD!!!");
 		memcpy(pd->sc.scbk, osdp_scbk_default, 16);
 	} else {
 		/**

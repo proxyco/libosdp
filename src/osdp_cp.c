@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <utils/utils.h>
 
@@ -300,6 +301,7 @@ static int cp_build_command(struct osdp_pd *pd, uint8_t *buf, int max_len)
 		ret = 0;
 		break;
 	case CMD_KEYSET:
+		LOG_INF("BUILDING KEYSET!!!!");
 		if (!ISSET_FLAG(pd, PD_FLAG_SC_ACTIVE)) {
 			LOG_ERR("Can not perform a KEYSET without SC!");
 			return -1;
@@ -619,7 +621,11 @@ static int cp_send_command(struct osdp_pd *pd)
 	if (pd->channel.flush) {
 		pd->channel.flush(pd->channel.data);
 	}
-
+	LOG_INF("Command:-\n");
+	for (int i = 0; i < len; ++i) {
+		printf("%02x ", pd->rx_buf[i]);
+	}
+	printf("\n");
 	ret = pd->channel.send(pd->channel.data, pd->rx_buf, len);
 	if (ret != len) {
 		LOG_ERR("Channel send for %d bytes failed! ret: %d", len, ret);
@@ -972,6 +978,7 @@ static int state_update(struct osdp_pd *pd)
 		cp_set_online(pd);
 		break;
 	case OSDP_CP_STATE_SET_SCBK:
+		LOG_INF("SETTING SCBK!!!!");
 		if (cp_cmd_dispatcher(pd, CMD_KEYSET) != 0) {
 			break;
 		}

@@ -283,6 +283,56 @@ void osdp_get_rand(uint8_t *buf, int len)
 
 #endif /* CONFIG_OSDP_USE_OPENSSL */
 
+
+int char2hex(char c, uint8_t *x)
+{
+  if (c >= '0' && c <= '9') {
+    *x = c - '0';
+  } else if (c >= 'a' && c <= 'f') {
+    *x = c - 'a' + 10;
+  } else if (c >= 'A' && c <= 'F') {
+    *x = c - 'A' + 10;
+  } else {
+    return -2;
+  }
+
+  return 0;
+}
+
+size_t hex2bin(const char *hex, size_t hexlen, uint8_t *buf, size_t buflen)
+{
+  uint8_t dec;
+
+  if (buflen < hexlen / 2 + hexlen % 2) {
+    return 0;
+  }
+
+  /* if hexlen is uneven, insert leading zero nibble */
+  if (hexlen % 2) {
+    if (char2hex(hex[0], &dec) < 0) {
+      return 0;
+    }
+    buf[0] = dec;
+    hex++;
+    buf++;
+  }
+
+  /* regular hex conversion */
+  for (size_t i = 0; i < hexlen / 2; i++) {
+    if (char2hex(hex[2 * i], &dec) < 0) {
+      return 0;
+    }
+    buf[i] = dec << 4;
+
+    if (char2hex(hex[2 * i + 1], &dec) < 0) {
+      return 0;
+    }
+    buf[i] += dec;
+  }
+
+  return hexlen / 2 + hexlen % 2;
+}
+
 /* --- Exported Methods --- */
 
 OSDP_EXPORT

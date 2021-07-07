@@ -384,5 +384,7 @@ void osdp_encrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len) __weak;
 void osdp_decrypt(uint8_t *key, uint8_t *iv, uint8_t *data, int len) __weak;
 void osdp_get_rand(uint8_t *buf, int len) __weak;
 void safe_free(void *p);
+int char2hex(char c, uint8_t *x);
+size_t hex2bin(const char *hex, size_t hexlen, uint8_t *buf, size_t buflen);
 
 #endif	/* _OSDP_COMMON_H_ */
